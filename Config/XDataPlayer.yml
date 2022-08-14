@@ -1,0 +1,12 @@
+ XDataPlayerConfig:
+  ServerIP: 127.0.0.1
+  Port: 6000
+  TotalTick: 28801
+  MarketChannelKey: 0XFF000005
+  CPUID: 18
+  TickerListPath: /
+  BackTest: false
+  MarketDataPath: /tmp/MarketData
+  IntervalMS : 1
+  BeginDay : 2021-12-27
+  EndDay: 2022-01-04
