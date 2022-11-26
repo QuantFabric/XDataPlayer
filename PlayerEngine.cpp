@@ -65,7 +65,7 @@ void PlayerEngine::Run()
         while(true)
         {
             memset(&m_MarketDataMessage, 0, sizeof(m_MarketDataMessage));
-            bool ret = m_HPPackClient->m_MarketDataMessageQueue.pop(m_MarketDataMessage);
+            bool ret = m_HPPackClient->m_MarketDataMessageQueue.Pop(m_MarketDataMessage);
             if(ret)
             {
                 auto it_ticker = m_TickerIndexMap.find(m_MarketDataMessage.FutureMarketData.Ticker);

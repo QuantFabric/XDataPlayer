@@ -10,7 +10,7 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
-#include "RingBuffer.hpp"
+#include "LockFreeQueue.hpp"
 #include "MarketData.hpp"
 
 class HPPackClient
@@ -22,7 +22,7 @@ public:
     static void SendData(HP_Client pClient, const unsigned char* pBuffer, int iLength);
     void SendData(const unsigned char* pBuffer, int iLength);
     virtual ~HPPackClient();
-    static Utils::RingBuffer<Message::PackMessage> m_MarketDataMessageQueue;
+    static Utils::LockFreeQueue<Message::PackMessage> m_MarketDataMessageQueue;
 protected:
     static En_HP_HandleResult __stdcall OnConnect(HP_Client pSender, HP_CONNID dwConnID);
     static En_HP_HandleResult __stdcall OnSend(HP_Server pSender, HP_CONNID dwConnID, const BYTE* pData, int iLength);

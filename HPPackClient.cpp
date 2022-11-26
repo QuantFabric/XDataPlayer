@@ -6,7 +6,7 @@ extern Utils::Logger* gLogger;
 std::string HPPackClient::m_ServerIP;
 unsigned int HPPackClient::m_ServerPort;
 
-Utils::RingBuffer<Message::PackMessage> HPPackClient::m_MarketDataMessageQueue(100);
+Utils::LockFreeQueue<Message::PackMessage> HPPackClient::m_MarketDataMessageQueue(1 << 10);
 
 HPPackClient::HPPackClient(const char* ip, unsigned int port)
 {
@@ -144,7 +144,7 @@ En_HP_HandleResult __stdcall HPPackClient::OnReceive(HP_Server pSender, HP_CONNI
     unsigned int MessageType = *((unsigned int*)pData);
     Message::PackMessage message;
     memcpy(&message, pData, iLength);
-    m_MarketDataMessageQueue.push(message);
+    while(!m_MarketDataMessageQueue.Push(message));
     return HR_OK;
 }
 
