@@ -1,9 +1,7 @@
  XDataPlayerConfig:
   ServerIP: 127.0.0.1
   Port: 6000
-  TotalTick: 28801
-  MarketChannelKey: 0XFF000005
-  CPUID: 18
+  MarketServer: MarketServer
   TickerListPath: /
   BackTest: false
   MarketDataPath: /tmp/MarketData

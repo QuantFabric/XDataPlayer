@@ -40,20 +40,18 @@ int main(int argc, char *argv[])
             break;
         }
     }
-    std::string path;
+    std::string app_log_path;
     char* p = getenv("APP_LOG_PATH");
     if(p == NULL)
     {
-        path = "./log/";
+        app_log_path = "./log/";
     }
     else
     {
-        path = p;
+        app_log_path = p;
     }
-    Utils::gLogger = Utils::Singleton<Utils::Logger>::GetInstance();
-    Utils::gLogger->setLogPath(path, "XDataPlayer_" + Account);
-    Utils::gLogger->Init();
-    Utils::gLogger->setDebugLevel(debug);
+    FMTLog::Logger::Init(app_log_path, "XDataPlayer");
+    FMTLog::Logger::SetDebugLevel(debug);
     PlayerEngine engine;
     engine.LoadConfig(ConfigPath.c_str());
     engine.Start();

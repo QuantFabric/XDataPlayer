@@ -1,15 +1,29 @@
 #include "PlayerEngine.h"
 
-extern Utils::Logger *gLogger;
 
 PlayerEngine::PlayerEngine()
 {
     m_HPPackClient = NULL;
+    m_PubServer = NULL;
+}
+
+PlayerEngine::~PlayerEngine()
+{
+    if(NULL != m_HPPackClient)
+    {
+        delete m_HPPackClient;
+        m_HPPackClient = NULL;
+    }
+    if(NULL != m_PubServer)
+    {
+        delete m_PubServer;
+        m_PubServer = NULL;
+    }
 }
 
 void PlayerEngine::LoadTCPClient()
 {
-    Utils::gLogger->Log->info("PlayerEngine::LoadTCPClient start");
+    FMTLOG(fmtlog::INF, "PlayerEngine::LoadTCPClient start");
     m_HPPackClient = new HPPackClient(m_XDataPlayerConfig.ServerIP.c_str(), m_XDataPlayerConfig.Port);
     m_HPPackClient->Start();
 }
@@ -25,15 +39,15 @@ void PlayerEngine::LoadConfig(const char* yml)
     std::string errorBuffer;
     if(Utils::LoadXDataPlayerConfig(yml, m_XDataPlayerConfig, errorBuffer))
     {
-        Utils::gLogger->Log->info("PlayerEngine::LoadXDataPlayerConfig {} successed", yml);
+        FMTLOG(fmtlog::INF, "PlayerEngine::LoadXDataPlayerConfig {} successed", yml);
     }
     else
     {
-        Utils::gLogger->Log->error("PlayerEngine::LoadXDataPlayerConfig {} failed, {}", yml, errorBuffer.c_str());
+        FMTLOG(fmtlog::ERR, "PlayerEngine::LoadXDataPlayerConfig {} failed, {}", yml, errorBuffer);
     }
     if(Utils::LoadTickerList(m_XDataPlayerConfig.TickerListPath.c_str(), m_TickerPropertyVec, errorBuffer))
     {
-        Utils::gLogger->Log->info("PlayerEngine::LoadTickerList {} successed", m_XDataPlayerConfig.TickerListPath);
+        FMTLOG(fmtlog::INF, "PlayerEngine::LoadTickerList {} successed", m_XDataPlayerConfig.TickerListPath);
         for(auto it = m_TickerPropertyVec.begin(); it != m_TickerPropertyVec.end(); ++it)
         {
             m_TickerIndexMap[it->Ticker] = it->Index;
@@ -41,7 +55,7 @@ void PlayerEngine::LoadConfig(const char* yml)
     }
     else
     {
-        Utils::gLogger->Log->error("PlayerEngine::LoadTickerList {} failed, {}", m_XDataPlayerConfig.TickerListPath, errorBuffer);
+        FMTLOG(fmtlog::ERR, "PlayerEngine::LoadTickerList {} failed, {}", m_XDataPlayerConfig.TickerListPath, errorBuffer);
     }
 }
 
@@ -51,37 +65,46 @@ void PlayerEngine::Start()
     {
         LoadTCPClient();
     }
+    m_PubServer = new PubServer();
+    m_PubServer->Start(m_XDataPlayerConfig.MarketServer);
+
     m_pWorkThread = new std::thread(&PlayerEngine::Run, this);
+
+    m_PubServer->Join();
     m_pWorkThread->join();
 }
 
 void PlayerEngine::Run()
 {
-    bool ok = Utils::ThreadBind(pthread_self(), m_XDataPlayerConfig.CPUID);
-    Utils::gLogger->Log->info("PlayerEngine::Run start, Thread bind to CPUID:{} {}", m_XDataPlayerConfig.CPUID, ok);
+    FMTLOG(fmtlog::INF, "PlayerEngine::Run start");
     if(!m_XDataPlayerConfig.BackTest)
     {
-        Utils::IPCMarketQueue<MarketData::TFutureMarketDataSet> MarketQueue(m_XDataPlayerConfig.TotalTick, m_XDataPlayerConfig.MarketChannelKey);
+        memset(&m_MarketDataMessage, 0, sizeof(m_MarketDataMessage));
         while(true)
         {
-            memset(&m_MarketDataMessage, 0, sizeof(m_MarketDataMessage));
             bool ret = m_HPPackClient->m_MarketDataMessageQueue.Pop(m_MarketDataMessage);
             if(ret)
             {
-                auto it_ticker = m_TickerIndexMap.find(m_MarketDataMessage.FutureMarketData.Ticker);
-                if(it_ticker != m_TickerIndexMap.end())
+                if(Message::EMessageType::EFutureMarketData == m_MarketDataMessage.MessageType)
                 {
-                    Utils::gLogger->Log->debug("PlayerEngine Last Tick:{} Ticker:{} UpdateTime:{}", 
-                                m_MarketDataMessage.FutureMarketData.Tick,  
-                                m_MarketDataMessage.FutureMarketData.Ticker, 
-                                m_MarketDataMessage.FutureMarketData.UpdateTime);
-                    m_LastMarketDataMap[m_MarketDataMessage.FutureMarketData.Ticker] = m_MarketDataMessage.FutureMarketData;
-                    if(m_MarketDataMessage.FutureMarketData.IsLast)
+                    auto it = m_TickerIndexMap.find(m_MarketDataMessage.FutureMarketData.Ticker);
+                    if(it != m_TickerIndexMap.end())
                     {
-                        MarketData::TFutureMarketDataSet dataset;
-                        UpdateLastMarketDataSet(dataset);
-                        MarketQueue.Write(dataset.Tick, dataset);
-                        Utils::gLogger->Log->info("PlayerEngine Last Tick:{} UpdateTime:{}", dataset.Tick, dataset.UpdateTime);
+                        if(!m_PubServer->Push(m_MarketDataMessage))
+                        {
+                            FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push FutureMarketData failed");
+                        }
+                    }
+                }
+                else if(Message::EMessageType::EStockMarketData == m_MarketDataMessage.MessageType)
+                {
+                    auto it = m_TickerIndexMap.find(m_MarketDataMessage.StockMarketData.Ticker);
+                    if(it != m_TickerIndexMap.end())
+                    {
+                        if(!m_PubServer->Push(m_MarketDataMessage))
+                        {
+                            FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push StockMarketData failed");
+                        }
                     }
                 }
             }
@@ -97,12 +120,13 @@ void PlayerEngine::Run()
     }
     else
     {
-        Utils::gLogger->Log->info("PlayerEngine::Run BackTest Mode, Start Read Market Data and Replay Market Data");
+        FMTLOG(fmtlog::INF, "PlayerEngine::Run BackTest Mode, Start Read Market Data and Replay Market Data");
+        m_MarketDataMessage.MessageType == Message::EMessageType::EFutureMarketData;
         long start = Utils::getTimeMs();
         std::vector<std::string> fileVector;
         if(Utils::ReadDirectory(m_XDataPlayerConfig.MarketDataPath, fileVector))
         {
-            Utils::gLogger->Log->info("PlayerEngine::Run ReadDirectory successed, {}", m_XDataPlayerConfig.MarketDataPath);
+            FMTLOG(fmtlog::INF, "PlayerEngine::Run ReadDirectory successed, {}", m_XDataPlayerConfig.MarketDataPath);
             std::vector<std::string> MatchedFileVec;
             bool begin = false;
             for(int j = 0; j < fileVector.size(); j++)
@@ -135,57 +159,28 @@ void PlayerEngine::Run()
                     {
                         continue;
                     }
-                    Utils::IPCMarketQueue<MarketData::TFutureMarketDataSet> MarketQueue(m_XDataPlayerConfig.TotalTick, m_XDataPlayerConfig.MarketChannelKey);
                     long begin = Utils::getTimeMs();
-                    int n = 0;
                     for(int j = 1; j < lines.size(); j++)
                     {
-                        n += 1;
                         ParseMarketData(lines.at(j), m_MarketDataMessage.FutureMarketData);
-                        m_LastMarketDataMap[m_MarketDataMessage.FutureMarketData.Ticker] = m_MarketDataMessage.FutureMarketData;
-                        if(m_TickerIndexMap.size() == n)
+                        if(!m_PubServer->Push(m_MarketDataMessage))
                         {
-                            MarketData::TFutureMarketDataSet dataset;
-                            UpdateLastMarketDataSet(dataset);
-                            MarketQueue.Write(dataset.Tick, dataset);
-                            Utils::gLogger->Log->info("PlayerEngine Last Tick:{} UpdateTime:{}", dataset.Tick, dataset.UpdateTime);
-                            usleep(m_XDataPlayerConfig.IntervalMS * 1000);
-                            n = 0;
+                            FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push FutureMarketData failed, j={}", j);
                         }
                     }
                     long end = Utils::getTimeMs();
-                    Utils::gLogger->Log->info("PlayerEngine::Run ReadFile {} done, elapsed:{}s", FilePath, (end - begin) / 1000.0);
+                    FMTLOG(fmtlog::INF, "PlayerEngine::Run ReadFile {} done, elapsed:{}s", FilePath, (end - begin) / 1000.0);
                 }
                 usleep(5*1000*1000);
             }
         }
         else
         {
-            Utils::gLogger->Log->warn("PlayerEngine::Run ReadDirectory failed, {}", m_XDataPlayerConfig.MarketDataPath);
+            FMTLOG(fmtlog::WRN, "PlayerEngine::Run ReadDirectory failed, {}", m_XDataPlayerConfig.MarketDataPath);
         }
         long stop = Utils::getTimeMs();
-        Utils::gLogger->Log->info("PlayerEngine::Run Market Data Replay elapsed:{}s", (stop - start) / 1000.0);
+        FMTLOG(fmtlog::INF, "PlayerEngine::Run Market Data Replay elapsed:{}s", (stop - start) / 1000.0);
     }
-}
-
-void PlayerEngine::UpdateLastMarketDataSet(MarketData::TFutureMarketDataSet& dataset)
-{
-    int Tick = -1;
-    for(auto it = m_LastMarketDataMap.begin(); it != m_LastMarketDataMap.end(); it++)
-    {
-        if(Tick < it->second.LastTick)
-        {
-            Tick = it->second.LastTick;
-        }
-        std::string Ticker = it->first;
-        int TickerIndex = m_TickerIndexMap[Ticker];
-        if(TickerIndex < TICKER_COUNT)
-        {
-            memcpy(&dataset.MarketData[TickerIndex], &it->second, sizeof(dataset.MarketData[TickerIndex]));
-        }
-    }
-    dataset.Tick = Tick;
-    strncpy(dataset.UpdateTime, Utils::getCurrentTimeUs(), sizeof(dataset.UpdateTime));
 }
 
 void PlayerEngine::ParseMarketData(const std::string& line, MarketData::TFutureMarketData& data)
@@ -194,7 +189,7 @@ void PlayerEngine::ParseMarketData(const std::string& line, MarketData::TFutureM
     std::vector<std::string> fileds;
     Utils::Split(line, ",", fileds);
     std::string filed;
-    // LastTick,Ticker,ExchangeID,RevDataLocalTime,Tick,SectionFirstTick,SectionLastTick,TotalTick,UpdateTime,MillSec,LastPrice
+    // LastTick,Ticker,ExchangeID,RecvLocalTime,Tick,SectionFirstTick,SectionLastTick,TotalTick,UpdateTime,MillSec,LastPrice
     filed = fileds.at(0);
     data.LastTick = atoi(filed.c_str());
     filed = fileds.at(1);
@@ -202,7 +197,7 @@ void PlayerEngine::ParseMarketData(const std::string& line, MarketData::TFutureM
     filed = fileds.at(2);
     strncpy(data.ExchangeID, filed.c_str(), sizeof(data.ExchangeID));
     filed = fileds.at(3);
-    strncpy(data.RevDataLocalTime, filed.c_str(), sizeof(data.RevDataLocalTime));
+    strncpy(data.RecvLocalTime, filed.c_str(), sizeof(data.RecvLocalTime));
     filed = fileds.at(4);
     data.Tick = atoi(filed.c_str());
     filed = fileds.at(5);
@@ -274,7 +269,7 @@ void PlayerEngine::ParseMarketData(const std::string& line, MarketData::TFutureM
     data.AskPrice4 = atof(filed.c_str());
     filed = fileds.at(36);
     data.AskVolume4 = atoi(filed.c_str());
-    // BidPrice5,BidVolume5,AskPrice5,AskVolume5,ErrorID,IsLast
+    // BidPrice5,BidVolume5,AskPrice5,AskVolume5,ErrorID
     filed = fileds.at(37);
     data.BidPrice5 = atof(filed.c_str());
     filed = fileds.at(38);
@@ -285,13 +280,4 @@ void PlayerEngine::ParseMarketData(const std::string& line, MarketData::TFutureM
     data.AskVolume5 = atoi(filed.c_str());
     filed = fileds.at(41);
     data.ErrorID = atoi(filed.c_str());
-    filed = fileds.at(42);
-    if(filed == "true")
-    {
-        data.IsLast = true;
-    }
-    else
-    {
-        data.IsLast = false;
-    }
 }
