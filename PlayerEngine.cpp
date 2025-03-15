@@ -90,7 +90,11 @@ void PlayerEngine::Run()
                     auto it = m_TickerIndexMap.find(m_MarketDataMessage.FutureMarketData.Ticker);
                     if(it != m_TickerIndexMap.end())
                     {
-                        if(!m_PubServer->Push(m_MarketDataMessage))
+                        if(m_PubServer->Push(m_MarketDataMessage))
+                        {
+                            FMTLOG(fmtlog::INF, "PlayerEngine::Run Push FutureMarketData ticker:{} {}", m_MarketDataMessage.FutureMarketData.Ticker, m_MarketDataMessage.FutureMarketData.RecvLocalTime);
+                        }
+                        else
                         {
                             FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push FutureMarketData failed");
                         }
@@ -101,9 +105,13 @@ void PlayerEngine::Run()
                     auto it = m_TickerIndexMap.find(m_MarketDataMessage.StockMarketData.Ticker);
                     if(it != m_TickerIndexMap.end())
                     {
-                        if(!m_PubServer->Push(m_MarketDataMessage))
+                        if(m_PubServer->Push(m_MarketDataMessage))
                         {
-                            FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push StockMarketData failed");
+                            FMTLOG(fmtlog::INF, "PlayerEngine::Run Push StockMarketData tikcer:{} {}", m_MarketDataMessage.StockMarketData.Ticker, m_MarketDataMessage.StockMarketData.RecvLocalTime);
+                        }
+                        else
+                        {
+                            FMTLOG(fmtlog::ERR, "PlayerEngine::Run Push FutureMarketData failed");
                         }
                     }
                 }
@@ -120,8 +128,7 @@ void PlayerEngine::Run()
     }
     else
     {
-        FMTLOG(fmtlog::INF, "PlayerEngine::Run BackTest Mode, Start Read Market Data and Replay Market Data");
-        m_MarketDataMessage.MessageType == Message::EMessageType::EFutureMarketData;
+        FMTLOG(fmtlog::INF, "PlayerEngine::Run BackTest Mode, Start Read Future Data and Replay Future Data");
         long start = Utils::getTimeMs();
         std::vector<std::string> fileVector;
         if(Utils::ReadDirectory(m_XDataPlayerConfig.MarketDataPath, fileVector))
@@ -149,6 +156,7 @@ void PlayerEngine::Run()
                     break;
                 }
             }
+            FMTLOG(fmtlog::INF, "PlayerEngine::Run  Matched file: {}", MatchedFileVec.size());
             for(int i = 0; i < MatchedFileVec.size(); i++)
             {
                 std::string FilePath = m_XDataPlayerConfig.MarketDataPath + "/" + MatchedFileVec.at(i);
